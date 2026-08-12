@@ -414,6 +414,22 @@
     </div>
 
     <div class="settings-group">
+      <span class="field-label">Calendrier iPhone</span>
+      <div class="settings-hint" style="margin-top:0; margin-bottom:10px;">Envoie tes cr&eacute;neaux dans l'app Calendrier pour recevoir de vrais rappels, m&ecirc;me appli ferm&eacute;e.</div>
+      <span class="field-label">Me pr&eacute;venir avant</span>
+      <div class="segmented" id="alarmSeg">
+        <button type="button" class="seg-btn" data-alarm="0">Aucun</button>
+        <button type="button" class="seg-btn" data-alarm="15">15 min</button>
+        <button type="button" class="seg-btn" data-alarm="30">30 min</button>
+        <button type="button" class="seg-btn" data-alarm="60">1 h</button>
+      </div>
+      <div class="row-btns" style="margin-top:12px;">
+        <button class="ghost-btn" id="icsBtn" style="background:var(--red); color:#fff;">Envoyer vers le Calendrier</button>
+      </div>
+      <div class="settings-hint" id="icsHint"></div>
+    </div>
+
+    <div class="settings-group">
       <span class="field-label">Zone sensible</span>
       <button class="danger-btn" id="wipeBtn" style="width:100%;">Effacer tout mon planning</button>
     </div>
@@ -441,6 +457,8 @@
   var STORAGE_KEY = 'events';
   var THEME_KEY = 'ms_theme';
   var FILTER_KEY = 'ms_filter';
+  var ALARM_KEY = 'ms_alarm';
+  var SEQ_KEY = 'ms_seq';
 
   var events = [];
   var weekOffset = 0;
@@ -1065,6 +1083,7 @@
   function openSettings(){
     var recur = events.filter(function(e){ return e.recurring; }).length;
     $('statsLine').textContent = events.length + ' créneau' + (events.length > 1 ? 'x' : '') + ' enregistré' + (events.length > 1 ? 's' : '') + ' · ' + recur + ' récurrent' + (recur > 1 ? 's' : '') + '.';
+    refreshIcsHint();
     $('importZone').style.display = 'none';
     $('importInput').value = '';
     $('setBackdrop').classList.add('open');
@@ -1127,6 +1146,154 @@
     });
   }
 
+
+  /* ---------- export calendrier (iCalendar) ---------- */
+  var ICS_DAYS = ['MO','TU','WE','TH','FR','SA','SU'];
+
+  function icsEscape(s){
+    return String(s == null ? '' : s)
+      .replace(/\\/g, '\\\\')
+      .replace(/;/g, '\\;')
+      .replace(/,/g, '\\,')
+      .replace(/\r?\n/g, '\\n');
+  }
+  function utf8Bytes(ch){
+    var c = ch.charCodeAt(0);
+    if(c < 0x80) return 1;
+    if(c < 0x800) return 2;
+    return 3;
+  }
+  function foldLine(line){
+    var out = '', cur = '', bytes = 0, limit = 72;
+    for(var i = 0; i < line.length; i++){
+      var b = utf8Bytes(line[i]);
+      if(bytes + b > limit){
+        out += (out ? '\r\n ' : '') + cur;
+        cur = ''; bytes = 0; limit = 71;
+      }
+      cur += line[i]; bytes += b;
+    }
+    return out + (out ? '\r\n ' : '') + cur;
+  }
+  function icsLocal(dIso, hhmm){
+    return dIso.replace(/-/g, '') + 'T' + hhmm.replace(':', '') + '00';
+  }
+  function icsStamp(){
+    var d = new Date();
+    return d.getUTCFullYear() + pad(d.getUTCMonth() + 1) + pad(d.getUTCDate()) + 'T' +
+           pad(d.getUTCHours()) + pad(d.getUTCMinutes()) + pad(d.getUTCSeconds()) + 'Z';
+  }
+
+  function buildICS(alarmMin, seq){
+    var L = [];
+    var stamp = icsStamp();
+    var monday = getMonday(new Date());
+
+    L.push('BEGIN:VCALENDAR');
+    L.push('VERSION:2.0');
+    L.push('PRODID:-//Ma Semaine//ASI Murs-Erigne//FR');
+    L.push('CALSCALE:GREGORIAN');
+    L.push('METHOD:PUBLISH');
+    L.push('X-WR-CALNAME:Ma Semaine');
+    L.push('X-WR-TIMEZONE:Europe/Paris');
+
+    var count = 0;
+    events.forEach(function(ev){
+      var startIso;
+      if(ev.recurring) startIso = isoDate(addDays(monday, ev.weekday));
+      else startIso = ev.date;
+      if(!startIso) return;
+      count++;
+
+      L.push('BEGIN:VEVENT');
+      L.push('UID:' + ev.id + '@ma-semaine');
+      L.push('DTSTAMP:' + stamp);
+      L.push('LAST-MODIFIED:' + stamp);
+      L.push('SEQUENCE:' + seq);
+      L.push('DTSTART:' + icsLocal(startIso, ev.startTime));
+      L.push('DTEND:' + icsLocal(startIso, ev.endTime));
+
+      if(ev.recurring){
+        L.push('RRULE:FREQ=WEEKLY;BYDAY=' + ICS_DAYS[ev.weekday]);
+        (ev.skips || []).slice().sort().forEach(function(d){
+          L.push('EXDATE:' + icsLocal(d, ev.startTime));
+        });
+      }
+
+      L.push('SUMMARY:' + icsEscape(ev.title));
+      if(ev.place) L.push('LOCATION:' + icsEscape(ev.place));
+
+      var desc = [];
+      if(ev.notes) desc.push(ev.notes);
+      desc.push('Categorie : ' + CATEGORIES[ev.category].label);
+      L.push('DESCRIPTION:' + icsEscape(desc.join('\n')));
+      L.push('CATEGORIES:' + icsEscape(CATEGORIES[ev.category].label));
+
+      if(alarmMin > 0){
+        L.push('BEGIN:VALARM');
+        L.push('ACTION:DISPLAY');
+        L.push('DESCRIPTION:' + icsEscape(ev.title));
+        L.push('TRIGGER:-PT' + alarmMin + 'M');
+        L.push('END:VALARM');
+      }
+      L.push('END:VEVENT');
+    });
+
+    L.push('END:VCALENDAR');
+    return {text: L.map(foldLine).join('\r\n') + '\r\n', count: count};
+  }
+
+  function currentAlarm(){
+    var v = parseInt(lsGet(ALARM_KEY), 10);
+    return isNaN(v) ? 30 : v;
+  }
+  function setAlarm(v){
+    lsSet(ALARM_KEY, String(v));
+    Array.prototype.forEach.call($('alarmSeg').querySelectorAll('.seg-btn'), function(b){
+      b.classList.toggle('selected', parseInt(b.dataset.alarm, 10) === v);
+    });
+    refreshIcsHint();
+  }
+  function refreshIcsHint(){
+    var a = currentAlarm();
+    var n = events.length;
+    $('icsHint').textContent = n
+      ? n + ' cr\u00e9neau' + (n > 1 ? 'x' : '') + ' \u00e0 envoyer' + (a ? ', rappel ' + (a === 60 ? '1 h' : a + ' min') + ' avant.' : ', sans rappel.')
+      : 'Ajoute des cr\u00e9neaux avant d\u2019envoyer.';
+  }
+
+  function exportICS(){
+    if(!events.length){ showToast('Ton planning est vide'); return; }
+    var seq = (parseInt(lsGet(SEQ_KEY), 10) || 0) + 1;
+    lsSet(SEQ_KEY, String(seq));
+
+    var built = buildICS(currentAlarm(), seq);
+    var blob = new Blob([built.text], {type: 'text/calendar;charset=utf-8'});
+
+    var file = null;
+    try{ file = new File([blob], 'ma-semaine.ics', {type: 'text/calendar'}); }catch(e){}
+
+    if(file && navigator.share && navigator.canShare && navigator.canShare({files: [file]})){
+      navigator.share({files: [file], title: 'Ma Semaine'}).then(function(){
+        showToast(built.count + ' cr\u00e9neaux envoy\u00e9s');
+      }).catch(function(){});
+      return;
+    }
+
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'ma-semaine.ics';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){
+      if(a.parentNode) a.parentNode.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 1500);
+    showToast('Fichier cr\u00e9\u00e9 : ouvre-le pour l\u2019importer');
+  }
+
   /* ---------- init ---------- */
   function init(){
     applyTheme(lsGet(THEME_KEY) || 'auto');
@@ -1171,6 +1338,11 @@
     });
     $('importBtn').addEventListener('click', importData);
     $('wipeBtn').addEventListener('click', wipeAll);
+    $('icsBtn').addEventListener('click', exportICS);
+    Array.prototype.forEach.call($('alarmSeg').querySelectorAll('.seg-btn'), function(b){
+      b.addEventListener('click', function(){ setAlarm(parseInt(b.dataset.alarm, 10)); });
+    });
+    setAlarm(currentAlarm());
     Array.prototype.forEach.call($('themeSeg').querySelectorAll('.seg-btn'), function(b){
       b.addEventListener('click', function(){ applyTheme(b.dataset.themeVal); });
     });
