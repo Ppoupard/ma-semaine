@@ -27,6 +27,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
+    color-scheme:light;
     --bg:#FAF9F6; --surface:#FFFFFF; --surface-2:#F3F0EE;
     --ink:#221B1C; --ink-soft:#78706E; --line:#EBE2E0;
     --red:#B3182A; --red-dark:#8F1220; --red-soft:#FBE7E6;
@@ -39,6 +40,7 @@
     --radius-md:14px; --radius-sm:10px;
   }
   [data-theme="dark"]{
+    color-scheme:dark;
     --bg:#141110; --surface:#1F1A19; --surface-2:#282221;
     --ink:#F2EDEB; --ink-soft:#9A908D; --line:#332B29;
     --red:#E24A5B; --red-dark:#C0303F; --red-soft:#3B1E21;
@@ -168,6 +170,8 @@
   .meta-sep{opacity:.45;}
   .note-flag{flex:0 0 auto; opacity:.55;}
 
+  .day-add{font-size:12.5px; font-weight:600; color:var(--red); text-align:left; padding:5px 2px 0; transition:opacity .15s ease;}
+  .day-add:active{opacity:.6;}
   .empty-add{display:flex; align-items:center; justify-content:space-between; width:100%; padding:13px 14px; border-radius:var(--radius-md); border:1px dashed var(--line); color:var(--ink-soft); font-size:13.5px; transition:transform .1s ease, border-color .15s ease;}
   .empty-add:active{transform:scale(.98); border-color:var(--red);}
   .empty-plus{color:var(--red); font-weight:600;}
@@ -226,11 +230,12 @@
   .day-chip.selected{background:var(--red-soft); border-color:var(--red);}
   .day-chip.selected .chip-day, .day-chip.selected .chip-num{color:var(--red);}
 
-  .time-row{display:flex; gap:12px; align-items:flex-end;}
-  .time-field{flex:1;}
-  .time-field input{width:100%; padding:10px 12px; border:1.5px solid var(--line); border-radius:var(--radius-sm); font-size:16px; background:var(--bg); outline:none;}
-  .time-field input:focus{border-color:var(--red);}
-  .dur-badge{font-size:12.5px; font-weight:700; color:var(--ink-soft); padding:0 0 11px; flex:0 0 auto; min-width:42px; text-align:center;}
+  .time-line{display:flex; align-items:center; gap:8px;}
+  .time-tag{font-size:13.5px; font-weight:600; color:var(--ink-soft); width:46px; flex:0 0 auto;}
+  .time-sel{flex:1; min-width:0; padding:10px 8px; border:1.5px solid var(--line); border-radius:var(--radius-sm); font-size:16px; background:var(--bg); color:var(--ink); outline:none; text-align:center;}
+  .time-sel:focus{border-color:var(--red);}
+  .time-colon{font-weight:700; color:var(--ink-soft); flex:0 0 auto;}
+  .dur-badge{font-size:12.5px; font-weight:700; color:var(--ink-soft); flex:0 0 auto; min-width:44px; text-align:right;}
   .inline-note{font-size:12.5px; margin-top:-8px; line-height:1.4;}
   .inline-note.err{color:var(--danger);}
   .inline-note.warn{color:var(--cat-perso);}
@@ -423,10 +428,20 @@
     </div>
 
     <div>
-      <div class="time-row">
-        <div class="time-field"><span class="field-label">Début</span><input type="time" id="startInput" value="18:00"></div>
-        <div class="dur-badge" id="durBadge">1h</div>
-        <div class="time-field"><span class="field-label">Fin</span><input type="time" id="endInput" value="19:00"></div>
+      <span class="field-label">Horaires</span>
+      <div class="time-line">
+        <span class="time-tag">Début</span>
+        <select id="startH" class="time-sel" aria-label="Heure de début"></select>
+        <span class="time-colon">:</span>
+        <select id="startM" class="time-sel" aria-label="Minute de début"></select>
+        <span class="dur-badge">&nbsp;</span>
+      </div>
+      <div class="time-line" style="margin-top:8px;">
+        <span class="time-tag">Fin</span>
+        <select id="endH" class="time-sel" aria-label="Heure de fin"></select>
+        <span class="time-colon">:</span>
+        <select id="endM" class="time-sel" aria-label="Minute de fin"></select>
+        <span class="dur-badge" id="durBadge">1h</span>
       </div>
     </div>
     <div class="inline-note err" id="timeError" style="display:none;">L'heure de fin doit être après le début.</div>
@@ -1000,7 +1015,7 @@
           if(at === -1) at = list.length;
           parts.splice(at, 0, '<div class="now-marker"><span class="now-dot"></span><span class="now-label">Maintenant</span><span class="now-line"></span></div>');
         }
-        body = parts.join('');
+        body = parts.join('') + '<button type="button" class="day-add" data-day="' + idx + '">+ Cr\u00e9neau</button>';
       } else {
         body = '<button type="button" class="empty-add" data-day="' + idx + '" style="animation-delay:' + (cardCounter++ * 32) + 'ms">' +
           '<span>' + (activeFilter ? 'Rien dans ce filtre' : 'Rien de prévu') + '</span><span class="empty-plus">+ Ajouter</span></button>';
@@ -1025,7 +1040,7 @@
         requestDelete(b.dataset.del, b.dataset.deldate);
       });
     });
-    Array.prototype.forEach.call(inner.querySelectorAll('.empty-add'), function(b){
+    Array.prototype.forEach.call(inner.querySelectorAll('.empty-add, .day-add'), function(b){
       b.addEventListener('click', function(){ openSheet(null, parseInt(b.dataset.day,10)); });
     });
     updateActiveDay();
@@ -1217,15 +1232,46 @@
   }
 
   /* ---------- edit sheet ---------- */
+  function fillHourOptions(){
+    var opts = '';
+    for(var i = 0; i < 24; i++) opts += '<option value="' + pad(i) + '">' + pad(i) + '</option>';
+    $('startH').innerHTML = opts;
+    $('endH').innerHTML = opts;
+  }
+  function setTimeSel(which, hhmm){
+    var parts = String(hhmm || '18:00').split(':');
+    var hh = Math.min(23, Math.max(0, parseInt(parts[0], 10) || 0));
+    var mm = Math.min(59, Math.max(0, parseInt(parts[1], 10) || 0));
+    var mins = [0,5,10,15,20,25,30,35,40,45,50,55];
+    if(mins.indexOf(mm) === -1){ mins.push(mm); mins.sort(function(a,b){ return a - b; }); }
+    var opts = '';
+    for(var i = 0; i < mins.length; i++) opts += '<option value="' + pad(mins[i]) + '">' + pad(mins[i]) + '</option>';
+    var sel = $(which + 'M');
+    sel.innerHTML = opts;
+    sel.value = pad(mm);
+    $(which + 'H').value = pad(hh);
+  }
+  function getTimeSel(which){
+    return $(which + 'H').value + ':' + $(which + 'M').value;
+  }
+  function onStartChange(){
+    var s = toMin(getTimeSel('start'));
+    if(toMin(getTimeSel('end')) <= s){
+      var ne = Math.min(23 * 60 + 55, s + 60);
+      setTimeSel('end', pad(Math.floor(ne / 60)) + ':' + pad(ne % 60));
+    }
+    updateDuration(); checkOverlap();
+  }
+
   function updateDuration(){
-    var s = toMin($('startInput').value || '0:00'), e = toMin($('endInput').value || '0:00');
+    var s = toMin(getTimeSel('start')), e = toMin(getTimeSel('end'));
     $('durBadge').textContent = e > s ? fmtDur(e - s) : '—';
   }
 
   function checkOverlap(){
     var w = $('overlapWarn');
-    var s = $('startInput').value, e = $('endInput').value;
-    if(!s || !e || e <= s){ w.style.display = 'none'; return; }
+    var s = getTimeSel('start'), e = getTimeSel('end');
+    if(e <= s){ w.style.display = 'none'; return; }
     var dates = weekDates();
     var diso = isoDate(dates[selectedDayIndex]);
     var clash = events.filter(function(ev){
@@ -1287,8 +1333,8 @@
 
     $('sheetTitle').textContent = id ? 'Modifier' : 'Nouveau créneau';
     $('titleInput').value = ev ? ev.title : '';
-    $('startInput').value = ev ? ev.startTime : '18:00';
-    $('endInput').value = ev ? ev.endTime : '19:00';
+    setTimeSel('start', ev ? ev.startTime : '18:00');
+    setTimeSel('end', ev ? ev.endTime : '19:00');
     $('placeInput').value = ev ? (ev.place || '') : '';
     $('notesInput').value = ev ? (ev.notes || '') : '';
     $('recurringToggle').checked = ev ? !!ev.recurring : true;
@@ -1342,8 +1388,8 @@
       title: $('titleInput').value.trim(),
       category: selectedCategory,
       weekday: selectedDayIndex,
-      startTime: $('startInput').value || '18:00',
-      endTime: $('endInput').value || '19:00',
+      startTime: getTimeSel('start'),
+      endTime: getTimeSel('end'),
       place: $('placeInput').value.trim(),
       notes: $('notesInput').value.trim(),
       recurring: recurring,
@@ -1354,8 +1400,8 @@
 
   function validate(){
     if(!$('titleInput').value.trim()){ $('titleInput').focus(); return false; }
-    var s = $('startInput').value, e = $('endInput').value;
-    if(!s || !e || e <= s){ $('timeError').style.display = 'block'; return false; }
+    var s = getTimeSel('start'), e = getTimeSel('end');
+    if(e <= s){ $('timeError').style.display = 'block'; return false; }
     $('timeError').style.display = 'none';
     return true;
   }
@@ -1696,15 +1742,11 @@
     $('deleteBtn').addEventListener('click', handleDeleteFromSheet);
     $('duplicateBtn').addEventListener('click', handleDuplicate);
 
-    $('startInput').addEventListener('change', function(){
-      var s = toMin($('startInput').value), e = toMin($('endInput').value);
-      if(e <= s){
-        var ne = s + 60;
-        $('endInput').value = pad(Math.floor(ne/60) % 24) + ':' + pad(ne % 60);
-      }
-      updateDuration(); checkOverlap();
-    });
-    $('endInput').addEventListener('change', function(){ updateDuration(); checkOverlap(); });
+    fillHourOptions();
+    $('startH').addEventListener('change', onStartChange);
+    $('startM').addEventListener('change', onStartChange);
+    $('endH').addEventListener('change', function(){ updateDuration(); checkOverlap(); });
+    $('endM').addEventListener('change', function(){ updateDuration(); checkOverlap(); });
 
     Array.prototype.forEach.call(document.querySelectorAll('.cat-chip'), function(chip){
       chip.addEventListener('click', function(){ selectedCategory = chip.dataset.cat; syncCatChips(); });
@@ -1794,7 +1836,7 @@
     }, {passive:true});
 
     if(window.ResizeObserver){
-      new ResizeObserver(measureHeader).observe($('topbarWrap'));
+      new window.ResizeObserver(measureHeader).observe($('topbarWrap'));
     } else {
       window.addEventListener('resize', measureHeader);
     }
